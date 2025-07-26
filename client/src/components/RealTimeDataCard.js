@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Copy, ExternalLink, RefreshCw } from 'lucide-react';
-import WalletAnalyticsService from '../services/WalletAnalyticsService';
+import { Copy, ExternalLink, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import DexScreenerService from '../services/DexScreenerService';
 
 const RealTimeDataCard = ({ contractAddress, network = 'ethereum' }) => {
   const [tokenData, setTokenData] = useState(null);
-  const [analysisResults, setAnalysisResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  
+  const dexScreenerService = new DexScreenerService();
 
   useEffect(() => {
     if (contractAddress) {
       fetchRealTimeData();
+      
+      // Set up auto-refresh every 30 seconds
+      const interval = setInterval(fetchRealTimeData, 30000);
+      return () => clearInterval(interval);
     }
   }, [contractAddress, network]);
 
@@ -20,43 +26,9 @@ const RealTimeDataCard = ({ contractAddress, network = 'ethereum' }) => {
     setError(null);
     
     try {
-      const analytics = new WalletAnalyticsService();
-      
-      // Extract real token metadata
-      const metadata = await analytics.getTokenMetadata(contractAddress, network);
-      
-      // Get top holders for analysis
-      const holders = await analytics.getTopHolders(contractAddress, network, 100);
-      
-      // Classify wallets
-      const classification = await analytics.classifyWallets(holders, contractAddress);
-      
-      // Get liquidity data
-      const liquidityData = await analytics.getLiquidityData(contractAddress, network);
-      
-      // Get market cap data
-      const marketData = await analytics.getMarketData(contractAddress, network);
-      
-      // Calculate bundle and MEV statistics
-      const bundleStats = calculateBundleStats(classification.bundleWallets);
-      const mevStats = calculateMEVStats(classification.mevWallets);
-      const teamStats = calculateTeamStats(classification.teamWallets);
-      
-      setTokenData({
-        ...metadata,
-        liquidityPool: liquidityData,
-        marketCap: marketData
-      });
-      
-      setAnalysisResults({
-        bundleWallets: classification.bundleWallets,
-        mevWallets: classification.mevWallets,
-        teamWallets: classification.teamWallets,
-        bundleStats,
-        mevStats,
-        teamStats
-      });
-      
+      const data = await dexScreenerService.getTokenData(contractAddress, network);
+      setTokenData(data);
+      setLastUpdated(new Date());
     } catch (err) {
       console.error('Error fetching real-time data:', err);
       setError(err.message);
@@ -65,102 +37,31 @@ const RealTimeDataCard = ({ contractAddress, network = 'ethereum' }) => {
     }
   };
 
-  const calculateBundleStats = (bundleWallets) => {
-    if (!bundleWallets || bundleWallets.length === 0) {
-      return { total: 0, spent: 0, tokens: 0, hold: 0, sold: 0, transfer: 0 };
-    }
-    
-    const total = bundleWallets.length;
-    const spent = bundleWallets.reduce((sum, wallet) => sum + (wallet.totalSpent || 0), 0);
-    const tokens = bundleWallets.reduce((sum, wallet) => sum + (wallet.tokenBalance || 0), 0);
-    
-    const holdCount = bundleWallets.filter(w => w.status === 'holding').length;
-    const soldCount = bundleWallets.filter(w => w.status === 'sold').length;
-    const transferCount = bundleWallets.filter(w => w.status === 'transfer').length;
-    
-    return {
-      total,
-      spent,
-      tokens,
-      hold: total > 0 ? ((holdCount / total) * 100).toFixed(1) : 0,
-      sold: total > 0 ? ((soldCount / total) * 100).toFixed(1) : 0,
-      transfer: total > 0 ? ((transferCount / total) * 100).toFixed(1) : 0
-    };
-  };
-
-  const calculateMEVStats = (mevWallets) => {
-    if (!mevWallets || mevWallets.length === 0) {
-      return { total: 0, spent: 0, tokens: 0, supply: 0, hold: 0, sold: 0, transfer: 0 };
-    }
-    
-    const total = mevWallets.length;
-    const spent = mevWallets.reduce((sum, wallet) => sum + (wallet.totalSpent || 0), 0);
-    const tokens = mevWallets.reduce((sum, wallet) => sum + (wallet.tokenBalance || 0), 0);
-    
-    // Calculate MEV supply percentage based on total token supply
-    const totalSupplyPercentage = mevWallets.reduce((sum, wallet) => {
-      const percentage = parseFloat(wallet.percentage) || 0;
-      return sum + percentage;
-    }, 0);
-    
-    const holdCount = mevWallets.filter(w => w.status === 'holding').length;
-    const soldCount = mevWallets.filter(w => w.status === 'sold').length;
-    const transferCount = mevWallets.filter(w => w.status === 'transfer').length;
-    
-    return {
-      total,
-      spent,
-      tokens,
-      supply: totalSupplyPercentage.toFixed(1), // ✅ Calculate actual MEV supply percentage
-      hold: total > 0 ? ((holdCount / total) * 100).toFixed(1) : 0,
-      sold: total > 0 ? ((soldCount / total) * 100).toFixed(1) : 0,
-      transfer: total > 0 ? ((transferCount / total) * 100).toFixed(1) : 0
-    };
-  };
-
-  const calculateTeamStats = (teamWallets) => {
-    if (!teamWallets || teamWallets.length === 0) {
-      return { bundled: 0, total: 0 };
-    }
-    
-    const totalPercentage = teamWallets.reduce((sum, wallet) => {
-      const percentage = parseFloat(wallet.percentage) || 0;
-      return sum + percentage;
-    }, 0);
-    
-    // Ensure totalPercentage is a valid number before calling toFixed
-    const validPercentage = isNaN(totalPercentage) ? 0 : totalPercentage;
-    
-    return {
-      bundled: validPercentage.toFixed(1),
-      total: validPercentage.toFixed(1)
-    };
-  };
-
-  const formatNumber = (num) => {
-    if (num >= 1e9) return `${(num / 1e9).toFixed(1)}B`;
-    if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M`;
-    if (num >= 1e3) return `${(num / 1e3).toFixed(1)}K`;
-    return num.toString();
-  };
-
-  const formatEther = (wei) => {
-    return `${(parseFloat(wei) / 1e18).toFixed(2)} Ξ`;
-  };
-
-  const formatUSD = (value) => {
-    return `$${(value / 1000).toFixed(1)}k`;
-  };
-
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
+  };
+
+  const openDexScreener = () => {
+    window.open(`https://dexscreener.com/${network}/${contractAddress}`, '_blank');
+  };
+
+  const getPriceChangeColor = (change) => {
+    if (change > 0) return 'text-green-400';
+    if (change < 0) return 'text-red-400';
+    return 'text-gray-400';
+  };
+
+  const getPriceChangeIcon = (change) => {
+    if (change > 0) return <TrendingUp className="w-4 h-4" />;
+    if (change < 0) return <TrendingDown className="w-4 h-4" />;
+    return null;
   };
 
   if (loading) {
     return (
       <div className="bg-gray-900/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6 text-center">
         <RefreshCw className="w-8 h-8 text-blue-400 animate-spin mx-auto mb-4" />
-        <p className="text-gray-300">Extracting real-time data...</p>
+        <p className="text-gray-300">Fetching real-time data from DexScreener...</p>
       </div>
     );
   }
@@ -179,117 +80,133 @@ const RealTimeDataCard = ({ contractAddress, network = 'ethereum' }) => {
     );
   }
 
-  if (!tokenData || !analysisResults) {
+  if (!tokenData) {
     return (
       <div className="bg-gray-900/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6 text-center">
-        <p className="text-gray-300">No data available</p>
+        <p className="text-gray-300">No real-time data available</p>
       </div>
     );
   }
 
-  const cardData = [
+  const realTimeCards = [
     {
-      title: "Token Name",
+      title: "Token Info",
       icon: "🏷️",
-      content: `${tokenData.name} (${tokenData.symbol})`,
+      content: (
+        <div className="text-xs">
+          <div className="font-semibold">{tokenData.name}</div>
+          <div className="text-gray-400">{tokenData.symbol}</div>
+        </div>
+      ),
       color: "text-blue-400"
     },
     {
-      title: "Total Supply",
-      icon: "🪙",
-      content: `${formatNumber(tokenData.formattedSupply)} ${tokenData.symbol}`,
+      title: "Current Price",
+      icon: "💰",
+      content: (
+        <div className="text-xs">
+          <div className="font-semibold">{dexScreenerService.formatPrice(tokenData.price)}</div>
+          <div className={`flex items-center gap-1 ${getPriceChangeColor(tokenData.priceChange24h)}`}>
+            {getPriceChangeIcon(tokenData.priceChange24h)}
+            {dexScreenerService.formatPercentage(tokenData.priceChange24h)}
+          </div>
+        </div>
+      ),
       color: "text-green-400"
     },
     {
-      title: "Liquidity Pool",
-      icon: "💧",
+      title: "24h Volume",
+      icon: "📊",
       content: (
         <div className="text-xs">
-          <div>Start LP: {formatNumber(tokenData.liquidityPool?.startLP || 0)} {tokenData.symbol}</div>
-          <div>ETH: {formatEther(tokenData.liquidityPool?.eth || 0)}</div>
-          <div>No-LP: {tokenData.liquidityPool?.noLPSupply || 0}%</div>
+          <div className="font-semibold">{dexScreenerService.formatLargeNumber(tokenData.volume24h)}</div>
+          <div className="text-gray-400">24h trading</div>
         </div>
       ),
       color: "text-cyan-400"
+    },
+    {
+      title: "Liquidity",
+      icon: "💧",
+      content: (
+        <div className="text-xs">
+          <div className="font-semibold">{dexScreenerService.formatLargeNumber(tokenData.liquidity)}</div>
+          <div className="text-gray-400">Total liquidity</div>
+        </div>
+      ),
+      color: "text-purple-400"
     },
     {
       title: "Market Cap",
       icon: "🧢",
       content: (
         <div className="text-xs">
-          <div>Launch: {formatUSD(tokenData.marketCap?.launch || 0)}</div>
-          <div>Current: {formatUSD(tokenData.marketCap?.current || 0)}</div>
+          <div className="font-semibold">{dexScreenerService.formatLargeNumber(tokenData.marketCap)}</div>
+          <div className="text-gray-400">Market cap</div>
         </div>
       ),
       color: "text-yellow-400"
     },
     {
-      title: "Bundle",
-      icon: "🎁",
+      title: "5m Change",
+      icon: "⚡",
       content: (
-        <div className="text-xs">
-          <div>Wallets: {analysisResults.bundleStats.total}</div>
-          <div>Spent: {formatEther(analysisResults.bundleStats.spent)}</div>
-          <div>Tokens: {formatNumber(analysisResults.bundleStats.tokens)}</div>
-        </div>
-      ),
-      color: "text-purple-400"
-    },
-    {
-      title: "Team Supply",
-      icon: "👥",
-      content: (
-        <div className="text-xs">
-          <div>Bundled: {analysisResults.teamStats.bundled}%</div>
-          <div>Total: {analysisResults.teamStats.total}%</div>
+        <div className={`text-xs ${getPriceChangeColor(tokenData.priceChange5m)}`}>
+          <div className="flex items-center gap-1">
+            {getPriceChangeIcon(tokenData.priceChange5m)}
+            <span className="font-semibold">{dexScreenerService.formatPercentage(tokenData.priceChange5m)}</span>
+          </div>
+          <div className="text-gray-400">5min change</div>
         </div>
       ),
       color: "text-orange-400"
     },
     {
-      title: "MEVs",
-      icon: "🤖",
+      title: "1h Change",
+      icon: "🕐",
       content: (
-        <div className="text-xs">
-          <div>Wallets: {analysisResults.mevStats.total}</div>
-          <div>Spent: {formatEther(analysisResults.mevStats.spent)}</div>
-          <div>Tokens: {formatNumber(analysisResults.mevStats.tokens)}</div>
+        <div className={`text-xs ${getPriceChangeColor(tokenData.priceChange1h)}`}>
+          <div className="flex items-center gap-1">
+            {getPriceChangeIcon(tokenData.priceChange1h)}
+            <span className="font-semibold">{dexScreenerService.formatPercentage(tokenData.priceChange1h)}</span>
+          </div>
+          <div className="text-gray-400">1hr change</div>
         </div>
       ),
-      color: "text-red-400"
-    },
-    {
-      title: "MEV Supply",
-      icon: "🎯",
-      content: `${analysisResults.mevStats.supply}%`,
       color: "text-pink-400"
     },
     {
-      title: "Bundle Wallets",
-      icon: "💼",
+      title: "24h Transactions",
+      icon: "🔄",
       content: (
         <div className="text-xs">
-          <div>Hold: {analysisResults.bundleStats.hold}%</div>
-          <div>Sold: {analysisResults.bundleStats.sold}%</div>
-          <div>Transfer: {analysisResults.bundleStats.transfer}%</div>
-          <div className="text-gray-400 mt-1">(Wallets 1-{analysisResults.bundleStats.total})</div>
+          <div className="text-green-400">Buys: {tokenData.txns24h.buys}</div>
+          <div className="text-red-400">Sells: {tokenData.txns24h.sells}</div>
         </div>
       ),
       color: "text-indigo-400"
     },
     {
-      title: "MEV Wallets",
-      icon: "🤖",
+      title: "DEX Info",
+      icon: "🏪",
       content: (
         <div className="text-xs">
-          <div>Hold: {analysisResults.mevStats.hold}%</div>
-          <div>Sold: {analysisResults.mevStats.sold}%</div>
-          <div>Transfer: {analysisResults.mevStats.transfer}%</div>
-          <div className="text-gray-400 mt-1">(Wallets 1-{analysisResults.mevStats.total})</div>
-          <div className="text-red-400 text-lg mt-2">🔴🔴🔴</div>
+          <div className="font-semibold">{tokenData.dexId}</div>
+          <div className="text-gray-400">{tokenData.chainId}</div>
         </div>
       ),
-      color: "text-red-400"
+      color: "text-teal-400"
+    },
+    {
+      title: "FDV",
+      icon: "💎",
+      content: (
+        <div className="text-xs">
+          <div className="font-semibold">{dexScreenerService.formatLargeNumber(tokenData.fdv)}</div>
+          <div className="text-gray-400">Fully diluted</div>
+        </div>
+      ),
+      color: "text-emerald-400"
     }
   ];
 
@@ -312,6 +229,13 @@ const RealTimeDataCard = ({ contractAddress, network = 'ethereum' }) => {
             <Copy className="w-4 h-4" />
           </button>
           <button 
+            onClick={openDexScreener}
+            className="text-purple-400 hover:text-purple-300 p-1"
+            title="Open in DexScreener"
+          >
+            <ExternalLink className="w-4 h-4" />
+          </button>
+          <button 
             onClick={fetchRealTimeData}
             className="text-green-400 hover:text-green-300 p-1"
             title="Refresh Data"
@@ -327,9 +251,9 @@ const RealTimeDataCard = ({ contractAddress, network = 'ethereum' }) => {
         <div className="text-blue-400 font-mono text-sm break-all">{contractAddress}</div>
       </div>
 
-      {/* 10 Cards Grid - 5 per row */}
+      {/* Real-time Data Grid - 5 per row */}
       <div className="grid grid-cols-5 gap-4">
-        {cardData.map((card, index) => (
+        {realTimeCards.map((card, index) => (
           <motion.div
             key={index}
             className="bg-gray-800/50 border border-gray-600 rounded-lg p-3 hover:border-gray-500 transition-all duration-200"
@@ -343,7 +267,7 @@ const RealTimeDataCard = ({ contractAddress, network = 'ethereum' }) => {
                 {card.title}
               </div>
               <div className="text-gray-300 text-xs">
-                {typeof card.content === 'string' ? card.content : card.content}
+                {card.content}
               </div>
             </div>
           </motion.div>
@@ -352,7 +276,9 @@ const RealTimeDataCard = ({ contractAddress, network = 'ethereum' }) => {
 
       {/* Last Updated */}
       <div className="mt-6 text-center text-xs text-gray-400">
-        Last updated: {new Date().toLocaleString()}
+        <div>Data from DexScreener</div>
+        <div>Last updated: {lastUpdated ? lastUpdated.toLocaleString() : 'Never'}</div>
+        <div className="text-green-400 mt-1">🟢 Auto-refreshing every 30 seconds</div>
       </div>
     </motion.div>
   );

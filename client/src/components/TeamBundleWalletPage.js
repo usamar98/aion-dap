@@ -1,258 +1,231 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Search, AlertTriangle, CheckCircle, TrendingUp, Wallet, Clock, Bell, Shield, Eye, Activity, DollarSign, ExternalLink } from 'lucide-react';
-import { ethers } from 'ethers';
+import { Search, Wallet, Users, Activity, CheckCircle, AlertTriangle, TrendingDown, Zap, Wifi, X, Shield, RefreshCw, DollarSign, TrendingUp, Eye, Bell } from 'lucide-react';
 import WalletAnalyticsService from '../services/WalletAnalyticsService';
 import RealTimeMonitor from '../services/RealTimeMonitor';
-import RealTimeDataCard from './RealTimeDataCard';
-import TokenGrid from './TokenGrid';
+import TelegramAlertService from '../services/TelegramAlertService';
 
 const TeamBundleWalletPage = () => {
+  // Core state
   const [contractAddress, setContractAddress] = useState('');
+  const [blockchain, setBlockchain] = useState('ethereum');
   const [isLoading, setIsLoading] = useState(false);
   const [analysisResults, setAnalysisResults] = useState(null);
-  const [realTimeData, setRealTimeData] = useState({});
-  const [alerts, setAlerts] = useState([]);
-  const [step, setStep] = useState(1);
-  const [monitoringActive, setMonitoringActive] = useState(false);
   const [error, setError] = useState(null);
-  const [retryCount, setRetryCount] = useState(0);
-  const [showGrid, setShowGrid] = useState(false); // ✅ Move this inside the component
+  
+  // Real-time monitoring state
+  const [monitoringActive, setMonitoringActive] = useState(false);
+  const [realTimeData, setRealTimeData] = useState({});
+  const [liveAlerts, setLiveAlerts] = useState([]);
+  const [monitoringStatus, setMonitoringStatus] = useState(null);
+  
+  // Services
+  const walletService = useRef(new WalletAnalyticsService());
+  const realTimeMonitor = useRef(new RealTimeMonitor());
+  const telegramService = useRef(new TelegramAlertService());
 
-  useEffect(() => {
-    if (analysisResults && monitoringActive) {
-      // Remove the 'new' keyword since RealTimeMonitor is already an instance
-      const monitor = RealTimeMonitor;
-      const walletData = [
-        ...analysisResults.teamWallets,
-        ...analysisResults.bundleWallets
-      ];
-      
-      // Subscribe to alerts first
-      const unsubscribe = monitor.subscribe((alert) => {
-        setAlerts(prev => [alert, ...prev.slice(0, 9)]); // Keep last 10 alerts
-        updateWalletData(alert.walletAddress);
-      });
-      
-      // Start monitoring with correct parameter order: (wallets, tokenAddress, network)
-      monitor.startMonitoring(walletData, contractAddress, 'ethereum');
+  const blockchains = [
+    { id: 'ethereum', name: 'Ethereum', chainId: 1 },
+    { id: 'bsc', name: 'BSC', chainId: 56 },
+    { id: 'base', name: 'Base', chainId: 8453 },
+    { id: 'polygon', name: 'Polygon', chainId: 137 },
+    { id: 'arbitrum', name: 'Arbitrum', chainId: 42161 }
+  ];
 
-      return () => {
-        monitor.stopMonitoring();
-        unsubscribe(); // Clean up subscription
-      };
-    }
-  }, [analysisResults, monitoringActive, contractAddress]);
-
-  const updateWalletData = async (walletAddress) => {
-    try {
-      const analytics = new WalletAnalyticsService();
-      const data = await analytics.getWalletAnalytics(walletAddress, contractAddress);
-      setRealTimeData(prev => ({
-        ...prev,
-        [walletAddress]: data
-      }));
-    } catch (error) {
-      console.error('Error updating wallet data:', error);
-    }
-  };
-
-  // Add retry functionality inside the component
-  const handleRetry = async () => {
-    if (retryCount < 3) {
-      setRetryCount(prev => prev + 1);
-      setError(null);
-      await handleAnalyze();
-    }
-  };
-
+  // Handle wallet analysis
+  // Handle wallet analysis
   const handleAnalyze = async () => {
-    if (!contractAddress.trim()) return;
-    
+    if (!contractAddress.trim()) {
+      setError('Please enter a valid contract address');
+      return;
+    }
+
     setIsLoading(true);
-    setStep(1);
-    setError(null); // Clear previous errors
-    
+    setError(null);
+    setAnalysisResults(null);
+
     try {
-      const analytics = new WalletAnalyticsService();
+      console.log(`🔍 Starting analysis for ${contractAddress} on ${blockchain}`);
       
-      // Step 1: Initial Analysis with timeout
-      setStep(1);
-      const tokenData = await Promise.race([
-        analytics.getTokenMetadata(contractAddress),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Token metadata timeout')), 15000))
-      ]);
-      
-      if (!tokenData) {
-        throw new Error('Failed to fetch token metadata');
+      // Step 1: Get contract deployer (optional)
+      const deployer = await walletService.current.getContractDeployer(contractAddress, blockchain);
+      if (deployer) {
+        console.log('✅ Deployer found:', deployer);
+      } else {
+        console.log('⚠️ Deployer not available - continuing analysis');
       }
       
-      // Step 2: Wallet Identification with timeout
-      setStep(2);
-      const holders = await Promise.race([
-        analytics.getTopHolders(contractAddress),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Holders fetch timeout')), 20000))
-      ]);
+      // Step 2: Get token metadata from Moralis
+      const tokenMetadata = await walletService.current.getTokenMetadata(contractAddress, blockchain);
+      console.log('✅ Token metadata:', tokenMetadata);
       
-      if (!holders || holders.length === 0) {
-        throw new Error('No holders found or failed to fetch holders');
-      }
+      // Step 3: Get top 100 holders from Moralis
+      const topHolders = await walletService.current.getTopHolders(contractAddress, blockchain);
+      console.log('✅ Top holders found:', topHolders.length, 'holders');
+      console.log('📊 Sample holder percentages:', topHolders.slice(0, 5).map(h => ({ address: h.address.slice(0, 8) + '...', percentage: h.percentage })));
       
-      // Step 3: Classification & Clustering with optimized processing
-      setStep(3);
-      const classification = await Promise.race([
-        analytics.classifyWalletsOptimized ? 
-          analytics.classifyWalletsOptimized(holders, contractAddress) :
-          analytics.classifyWallets(holders, contractAddress),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Classification timeout')), 30000))
-      ]);
-      
-      // Step 4: Historical Analysis with batch processing
-      setStep(4);
-      const historicalData = await Promise.race([
-        analytics.getHistoricalTransactionsBatch ? 
-          analytics.getHistoricalTransactionsBatch(classification.allWallets, contractAddress) :
-          analytics.getHistoricalTransactions(classification.allWallets, contractAddress),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Historical analysis timeout')), 25000))
-      ]);
-      
-      // Step 5: Setup Monitoring
-      setStep(5);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Step 4: Classify wallets (works with or without deployer)
+      const classification = await walletService.current.classifyWallets(
+        topHolders,
+        deployer, // May be null
+        tokenMetadata,
+        blockchain
+      );
+      console.log('✅ Classification complete:', {
+        teamWallets: classification.teamWallets.length,
+        bundleWallets: classification.bundleWallets.length,
+        regularWallets: classification.regularWallets.length
+      });
       
       const results = {
-        tokenMetadata: {
-          ...tokenData,
-          liquidityPool: tokenData.liquidityPool || 0,
-          marketCap: tokenData.marketCap || 0
-        },
-        deployer: classification.deployer,
+        contractAddress,
+        blockchain,
+        deployer, // May be null
+        tokenMetadata,
+        topHolders,
         teamWallets: classification.teamWallets,
         bundleWallets: classification.bundleWallets,
-        historicalData,
-        monitoring: {
-          status: 'Ready',
-          alertsEnabled: true,
-          trackingWallets: classification.teamWallets.length + classification.bundleWallets.length
-        },
-        riskAssessment: {
-          overall: 'Medium',
-          rugPullRisk: 45,
-          recommendation: 'Monitor closely for unusual wallet activity'
-        },
-        // Add real-time metrics for the card
-        realTimeMetrics: {
-          bundleSoldPercentage: 92.2, // Calculate from real data
-          mevSoldPercentage: 100, // Calculate from real data
-          mevCount: 5 // Calculate from real data
-        }
+        analysisTimestamp: Date.now()
       };
-
+      
       setAnalysisResults(results);
       
-      // Initialize real-time data efficiently
-      const initialRealTimeData = {};
-      const walletBatches = [...results.teamWallets, ...results.bundleWallets];
-      
-      for (let i = 0; i < walletBatches.length; i += 3) {
-        const batch = walletBatches.slice(i, i + 3);
-        const batchPromises = batch.map(wallet => 
-          analytics.getWalletAnalytics(wallet.address, contractAddress).catch(() => ({
-            totalBought: 0,
-            totalSold: 0,
-            currentBalance: 0,
-            totalUsdValue: 0,
-            riskScore: 0,
-            lastUpdate: Date.now()
-          }))
-        );
-        
-        const batchResults = await Promise.all(batchPromises);
-        batch.forEach((wallet, index) => {
-          initialRealTimeData[wallet.address] = batchResults[index];
-        });
-        
-        // Small delay between batches
-        if (i + 3 < walletBatches.length) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
-      
-      setRealTimeData(initialRealTimeData);
-      setRetryCount(0); // Reset retry count on success
+      // Auto-start real-time monitoring
+      setTimeout(() => {
+        startRealTimeMonitoring(results);
+      }, 1000);
       
     } catch (error) {
-      console.error('Analysis error:', error);
-      setError({
-        message: error.message,
-        canRetry: retryCount < 3,
-        suggestions: [
-          'Verify the contract address is correct',
-          'Check your internet connection',
-          'Try again in a few moments',
-          'Contact support if the issue persists'
-        ]
-      });
+      console.error('❌ Analysis error:', error);
+      setError(`Analysis failed: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const startMonitoring = () => {
-    setMonitoringActive(true);
-  };
-
-  const stopMonitoring = () => {
-    setMonitoringActive(false);
-  };
-
-  const getRiskColor = (risk) => {
-    switch (risk?.toLowerCase()) {
-      case 'high': return 'text-red-400 bg-red-900/20 border-red-700';
-      case 'medium': return 'text-yellow-400 bg-yellow-900/20 border-yellow-700';
-      case 'low': return 'text-green-400 bg-green-900/20 border-green-700';
-      default: return 'text-gray-400 bg-gray-900/20 border-gray-700';
-    }
-  };
-
-  const formatUSD = (value) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2
-    }).format(value || 0);
-  };
-
-  const formatTokenAmount = (amount, decimals = 18) => {
-    // ✅ Add comprehensive checks for the amount parameter
-    if (!amount || amount === '0' || amount === 0) {
-      return '0';
-    }
-    
-    // Check if amount is already a formatted number (not wei)
-    if (typeof amount === 'number' || (typeof amount === 'string' && !amount.includes('e') && parseFloat(amount) < 1e15)) {
-      // Already formatted, just format for display
-      return parseFloat(amount).toLocaleString();
+  // Start real-time monitoring
+  // Update the startRealTimeMonitoring function
+  const startRealTimeMonitoring = useCallback(async (results = analysisResults) => {
+    if (!results) {
+      console.error('❌ No results provided for monitoring');
+      return;
     }
     
     try {
-      // Only use ethers.formatUnits for large wei values
-      const formatted = ethers.formatUnits(amount.toString(), decimals);
-      return parseFloat(formatted).toLocaleString();
+      console.log('🔍 Starting monitoring with results:', {
+        hasTeamWallets: !!results.teamWallets,
+        teamWalletsLength: results.teamWallets?.length || 0,
+        hasBundleWallets: !!results.bundleWallets,
+        bundleWalletsLength: results.bundleWallets?.length || 0
+      });
+      
+      // Ensure arrays are defined before spreading
+      const teamWallets = Array.isArray(results.teamWallets) ? results.teamWallets : [];
+      const bundleWallets = Array.isArray(results.bundleWallets) ? results.bundleWallets : [];
+      const allWallets = [...teamWallets, ...bundleWallets];
+      
+      console.log(`📊 Monitoring setup: ${teamWallets.length} team + ${bundleWallets.length} bundle = ${allWallets.length} total wallets`);
+      
+      // Check if there are any wallets to monitor
+      if (allWallets.length === 0) {
+        console.log('⚠️ No wallets to monitor');
+        setError('No team or bundle wallets detected for monitoring');
+        return;
+      }
+      
+      // Initialize real-time monitor
+      console.log('🔧 Initializing monitor...');
+      await realTimeMonitor.current.initialize({
+        tokenAddress: results.contractAddress,
+        blockchain: results.blockchain,
+        wallets: allWallets
+      });
+      
+      // Subscribe to alerts
+      realTimeMonitor.current.onAlert((alert) => {
+        setLiveAlerts(prev => [alert, ...prev.slice(0, 49)]); // Keep last 50 alerts
+        
+        // Send Telegram alert for suspicious activity
+        if (alert.severity === 'high') {
+          telegramService.current.sendAlert(alert);
+        }
+      });
+      
+      // Subscribe to wallet updates
+      realTimeMonitor.current.onWalletUpdate((walletData) => {
+        setRealTimeData(prev => ({
+          ...prev,
+          [walletData.address]: walletData
+        }));
+      });
+      
+      // Start monitoring
+      console.log('▶️ Starting monitoring...');
+      const started = await realTimeMonitor.current.startMonitoring();
+      
+      if (started) {
+        setMonitoringActive(true);
+        console.log('✅ Monitoring started successfully');
+      } else {
+        console.error('❌ Failed to start monitoring');
+        setError('Failed to start monitoring');
+      }
+      
+      // Update monitoring status
+      setInterval(() => {
+        setMonitoringStatus(realTimeMonitor.current.getStatus());
+      }, 5000);
+      
     } catch (error) {
-      console.warn(`Failed to format token amount: ${amount}`, error);
-      // Fallback: treat as already formatted number
-      return parseFloat(amount || 0).toLocaleString();
+      console.error('❌ Monitoring error:', error);
+      setError(`Monitoring failed: ${error.message}`);
     }
+  }, [analysisResults]);
+
+  // Stop monitoring
+  const stopMonitoring = useCallback(() => {
+    realTimeMonitor.current.stopMonitoring();
+    setMonitoringActive(false);
+    setMonitoringStatus(null);
+  }, []);
+
+  // Format utilities
+  const formatTokenAmount = (amount) => {
+    if (!amount) return '0';
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(amount);
   };
 
-  const analysisSteps = [
-    { id: 1, name: 'Initial Analysis', icon: Search, description: 'Fetching token metadata and supply data' },
-    { id: 2, name: 'Wallet Identification', icon: Wallet, description: 'Identifying team and bundle wallets' },
-    { id: 3, name: 'Classification & Clustering', icon: Users, description: 'Analyzing wallet patterns and relationships' },
-    { id: 4, name: 'Historical Analysis', icon: Activity, description: 'Analyzing transaction history and patterns' },
-    { id: 5, name: 'Setup Complete', icon: CheckCircle, description: 'Ready for real-time monitoring' }
-  ];
+  const formatPercentage = (percentage) => {
+    if (!percentage) return '0%';
+    return `${percentage.toFixed(2)}%`;
+  };
+
+  const formatUSD = (amount) => {
+    if (!amount) return '$0.00';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(amount);
+  };
+
+  const getWalletRiskColor = (wallet) => {
+    if (wallet.type === 'Team Wallet') {
+      return wallet.supplyPercentage > 5 ? 'text-red-400' : 'text-yellow-400';
+    }
+    return 'text-orange-400';
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (monitoringActive) {
+        stopMonitoring();
+      }
+    };
+  }, [monitoringActive, stopMonitoring]);
 
   return (
     <div className="space-y-6">
@@ -262,43 +235,9 @@ const TeamBundleWalletPage = () => {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
       >
-        <h1 className="text-4xl font-bold text-white mb-4">Team & Bundle Wallet Scanner</h1>
-        <p className="text-gray-400 text-lg">Advanced real-time wallet analytics with sell detection and alerts</p>
+        <h1 className="text-4xl font-bold text-white mb-4">Team & Bundle Wallet Analysis</h1>
+        <p className="text-gray-400 text-lg">Real-time blockchain wallet scanner with live monitoring and alerts</p>
       </motion.div>
-
-      {/* Error Display */}
-      {error && (
-        <motion.div
-          className="bg-red-900/20 border border-red-700/50 rounded-xl p-6"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-red-300 flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5" />
-              Analysis Error
-            </h3>
-            {error.canRetry && (
-              <button
-                onClick={handleRetry}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
-              >
-                Retry ({3 - retryCount} attempts left)
-              </button>
-            )}
-          </div>
-          <div className="text-red-200 mb-4">{error.message}</div>
-          <div className="space-y-2">
-            <div className="text-red-300 font-semibold">Suggestions:</div>
-            <ul className="list-disc list-inside text-red-200 space-y-1">
-              {error.suggestions.map((suggestion, index) => (
-                <li key={index}>{suggestion}</li>
-              ))}
-            </ul>
-          </div>
-        </motion.div>
-      )}
 
       {/* Input Section */}
       <motion.div
@@ -307,346 +246,405 @@ const TeamBundleWalletPage = () => {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, delay: 0.1 }}
       >
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Contract Address
-            </label>
-            <input
-              type="text"
-              value={contractAddress}
-              onChange={(e) => setContractAddress(e.target.value)}
-              placeholder="Enter token contract address (0x...)"
-              className="w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
-            />
-          </div>
-          <div className="flex items-end gap-2">
-            <button
-              onClick={handleAnalyze}
-              disabled={isLoading || !contractAddress.trim()}
-              className="px-8 py-3 bg-gradient-to-r from-blue-600 to-blue-400 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 flex items-center gap-2"
-            >
-              {isLoading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <Users className="w-4 h-4" />
-                  Analyze
-                </>
-              )}
-            </button>
-            {analysisResults && (
-              <button
-                onClick={monitoringActive ? stopMonitoring : startMonitoring}
-                className={`px-6 py-3 font-semibold rounded-lg transition-all duration-300 flex items-center gap-2 ${
-                  monitoringActive 
-                    ? 'bg-red-600 hover:bg-red-700 text-white' 
-                    : 'bg-green-600 hover:bg-green-700 text-white'
-                }`}
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Token Contract Address
+              </label>
+              <input
+                type="text"
+                value={contractAddress}
+                onChange={(e) => setContractAddress(e.target.value)}
+                placeholder="0x..."
+                className="w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Blockchain
+              </label>
+              <select
+                value={blockchain}
+                onChange={(e) => setBlockchain(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 transition-colors"
               >
-                <Eye className="w-4 h-4" />
-                {monitoringActive ? 'Stop' : 'Start'} Monitoring
-              </button>
-            )}
+                {blockchains.map(chain => (
+                  <option key={chain.id} value={chain.id}>{chain.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
+          
+          <button
+            onClick={handleAnalyze}
+            disabled={isLoading || !contractAddress.trim()}
+            className="w-full md:w-auto px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+          >
+            {isLoading ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <Search className="w-4 h-4" />
+                Analyze Wallets
+              </>
+            )}
+          </button>
         </div>
       </motion.div>
 
-      {/* Real-time Alerts */}
-      {alerts.length > 0 && (
+      {/* Real-time Monitoring Controls */}
+      {analysisResults && (
         <motion.div
           className="bg-gray-900/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+              <Activity className="w-5 h-5" />
+              Real-time Monitoring
+              {monitoringActive && <span className="text-green-400 text-sm animate-pulse">● LIVE</span>}
+            </h3>
+            <div className="flex gap-2">
+              {!monitoringActive ? (
+                <button
+                  onClick={() => startRealTimeMonitoring()}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <Zap className="w-4 h-4" />
+                  Start Monitoring
+                </button>
+              ) : (
+                <button
+                  onClick={stopMonitoring}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <X className="w-4 h-4" />
+                  Stop Monitoring
+                </button>
+              )}
+            </div>
+          </div>
+          
+          {monitoringStatus && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+              <div className="bg-gray-800/50 p-3 rounded-lg">
+                <div className="text-gray-400">Monitored Wallets</div>
+                <div className="text-white font-semibold">{monitoringStatus.walletCount}</div>
+              </div>
+              <div className="bg-gray-800/50 p-3 rounded-lg">
+                <div className="text-gray-400">Live Alerts</div>
+                <div className="text-yellow-400 font-semibold">{liveAlerts.length}</div>
+              </div>
+              <div className="bg-gray-800/50 p-3 rounded-lg">
+                <div className="text-gray-400">Connection</div>
+                <div className={`font-semibold ${monitoringStatus.connected ? 'text-green-400' : 'text-red-400'}`}>
+                  {monitoringStatus.connected ? '🟢 Connected' : '🔴 Disconnected'}
+                </div>
+              </div>
+              <div className="bg-gray-800/50 p-3 rounded-lg">
+                <div className="text-gray-400">Last Check</div>
+                <div className="text-white font-semibold">
+                  {monitoringStatus.lastCheck ? new Date(monitoringStatus.lastCheck).toLocaleTimeString() : 'Never'}
+                </div>
+              </div>
+            </div>
+          )}
+        </motion.div>
+      )}
+
+      {/* Error Display */}
+      {error && (
+        <motion.div
+          className="bg-red-900/20 border border-red-700/50 rounded-xl p-6"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="flex items-center gap-2 text-red-400 mb-2">
+            <AlertTriangle className="w-5 h-5" />
+            <span className="font-semibold">Error</span>
+          </div>
+          <p className="text-red-300">{error}</p>
+        </motion.div>
+      )}
+
+      {/* Live Alerts */}
+      {liveAlerts.length > 0 && (
+        <motion.div
+          className="bg-yellow-900/20 border border-yellow-700/50 rounded-xl p-6"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
         >
           <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-            <Bell className="w-5 h-5 text-red-400" />
-            Live Sell Alerts
+            <Bell className="w-5 h-5 text-yellow-400" />
+            Live Alerts ({liveAlerts.length})
           </h3>
-          <div className="space-y-3 max-h-64 overflow-y-auto">
-            {alerts.map((alert, index) => (
-              <div key={index} className="bg-red-900/20 border border-red-700/50 p-4 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-red-300 font-semibold">🚨 SELL DETECTED</span>
-                  <span className="text-gray-400 text-sm">{new Date(alert.timestamp).toLocaleTimeString()}</span>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {liveAlerts.slice(0, 10).map((alert, index) => (
+              <div key={index} className="bg-gray-800/50 p-3 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${
+                      alert.severity === 'high' ? 'bg-red-400' :
+                      alert.severity === 'medium' ? 'bg-yellow-400' : 'bg-blue-400'
+                    }`} />
+                    <span className="text-white font-medium">{alert.type}</span>
+                  </div>
+                  <span className="text-gray-400 text-sm">
+                    {new Date(alert.timestamp).toLocaleTimeString()}
+                  </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <span className="text-gray-400">Wallet: </span>
-                    <span className="text-white font-mono">{alert.walletAddress.slice(0, 10)}...</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">Amount: </span>
-                    <span className="text-white">{formatTokenAmount(alert.amount)} tokens</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">Value: </span>
-                    <span className="text-white">{formatUSD(alert.usdValue)}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">DEX: </span>
-                    <span className="text-white">{alert.dex}</span>
-                  </div>
-                </div>
-                <div className="mt-2">
-                  <a 
-                    href={alert.txLink} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1"
-                  >
-                    View Transaction <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
+                <p className="text-gray-300 text-sm mt-1">{alert.message}</p>
+                {alert.walletAddress && (
+                  <p className="text-blue-400 text-xs mt-1 font-mono">{alert.walletAddress}</p>
+                )}
               </div>
             ))}
           </div>
         </motion.div>
       )}
 
-      {/* Analysis Progress */}
-      {isLoading && (
-        <motion.div
-          className="bg-gray-900/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-        >
-          <h3 className="text-xl font-bold text-white mb-4">Analysis in Progress</h3>
-          <div className="space-y-4">
-            {analysisSteps.map((stepItem) => {
-              const Icon = stepItem.icon;
-              const isActive = step === stepItem.id;
-              const isCompleted = step > stepItem.id;
-              
-              return (
-                <div key={stepItem.id} className={`flex items-center gap-4 p-3 rounded-lg transition-all duration-300 ${
-                  isActive ? 'bg-blue-900/30 border border-blue-700/50' : 
-                  isCompleted ? 'bg-green-900/20 border border-green-700/30' : 
-                  'bg-gray-800/30'
-                }`}>
-                  <div className={`p-2 rounded-full ${
-                    isActive ? 'bg-blue-600' : 
-                    isCompleted ? 'bg-green-600' : 
-                    'bg-gray-600'
-                  }`}>
-                    <Icon className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="flex-1">
-                    <div className={`font-semibold ${
-                      isActive ? 'text-blue-300' : 
-                      isCompleted ? 'text-green-300' : 
-                      'text-gray-400'
-                    }`}>
-                      {stepItem.name}
-                    </div>
-                    <div className="text-sm text-gray-500">{stepItem.description}</div>
-                  </div>
-                  {isActive && (
-                    <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-                  )}
-                  {isCompleted && (
-                    <CheckCircle className="w-4 h-4 text-green-400" />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </motion.div>
-      )}
-
-      {/* Results with Real-time Data */}
+      {/* Analysis Results */}
       {analysisResults && (
         <motion.div
           className="space-y-6"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
         >
-          {/* Monitoring Status */}
+          {/* Token Metadata */}
           <div className="bg-gray-900/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
             <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-              <Activity className="w-5 h-5" />
-              Real-time Monitoring Status
+              <Eye className="w-5 h-5" />
+              Token Information
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-gray-800/50 p-4 rounded-lg text-center">
-                <div className={`text-2xl font-bold ${
-                  monitoringActive ? 'text-green-400' : 'text-gray-400'
-                }`}>
-                  {monitoringActive ? 'ACTIVE' : 'INACTIVE'}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <div className="text-gray-400 text-sm">Name</div>
+                <div className="text-white font-semibold">{analysisResults.tokenMetadata.name}</div>
+              </div>
+              <div>
+                <div className="text-gray-400 text-sm">Symbol</div>
+                <div className="text-white font-semibold">{analysisResults.tokenMetadata.symbol}</div>
+              </div>
+              <div>
+                <div className="text-gray-400 text-sm">Total Supply</div>
+                <div className="text-white font-semibold">
+                  {formatTokenAmount(analysisResults.tokenMetadata.totalSupply)}
                 </div>
-                <div className="text-sm text-gray-400">Monitoring Status</div>
               </div>
-              <div className="bg-gray-800/50 p-4 rounded-lg text-center">
-                <div className="text-2xl font-bold text-blue-400">{analysisResults.monitoring.trackingWallets}</div>
-                <div className="text-sm text-gray-400">Wallets Tracked</div>
-              </div>
-              <div className="bg-gray-800/50 p-4 rounded-lg text-center">
-                <div className="text-2xl font-bold text-yellow-400">{alerts.length}</div>
-                <div className="text-sm text-gray-400">Recent Alerts</div>
-              </div>
-              <div className="bg-gray-800/50 p-4 rounded-lg text-center">
-                <div className="text-2xl font-bold text-purple-400">
-                  {Object.keys(realTimeData).length}
+              <div>
+                <div className="text-gray-400 text-sm">Deployer</div>
+                <div className="text-blue-400 font-mono text-sm">
+                  {analysisResults.deployer?.address || 'Not Available'}
                 </div>
-                <div className="text-sm text-gray-400">Live Data Feeds</div>
+              </div>
+              <div>
+                <div className="text-gray-400 text-sm">Deploy Block</div>
+                <div className="text-white font-semibold">
+                  {analysisResults.deployer?.blockNumber || 'Not Available'}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-400 text-sm">Blockchain</div>
+                <div className="text-white font-semibold capitalize">{analysisResults.blockchain}</div>
               </div>
             </div>
           </div>
 
-          {/* Real-time Data Card with extracted data */}
-          <RealTimeDataCard 
-            contractAddress={contractAddress}
-            network="ethereum"
-          />
-
-          {/* Enhanced Team Wallets with Real-time Analytics */}
-          <div className="bg-gray-900/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
-            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-              <Users className="w-5 h-5" />
-              Team Wallets - Live Analytics
-            </h3>
-            <div className="space-y-4">
-              {analysisResults.teamWallets.map((wallet, index) => {
-                const liveData = realTimeData[wallet.address];
-                return (
-                  <div key={index} className="bg-gray-800/50 p-4 rounded-lg">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="text-white font-mono text-sm">{wallet.address}</div>
-                        <div className="text-gray-400 text-xs">{wallet.type}</div>
+          {/* Team Wallets */}
+          {analysisResults && (
+            <div className="bg-gradient-to-r from-blue-900/20 to-blue-800/20 backdrop-blur-sm border border-blue-700/30 rounded-xl p-6">
+              <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <Users className="w-5 h-5 text-blue-400" />
+                Team Wallets ({(analysisResults.teamWallets || []).length})
+                {monitoringActive && <span className="text-green-400 text-sm animate-pulse">● LIVE</span>}
+              </h3>
+              
+              {(analysisResults.teamWallets || []).length > 0 ? (
+                <div className="space-y-4">
+                  {analysisResults.teamWallets.map((wallet, index) => {
+                    const liveData = realTimeData[wallet.address];
+                    return (
+                      <div key={index} className="bg-gray-800/50 p-4 rounded-lg border border-blue-700/30">
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <div className="text-blue-400 font-mono text-sm">{wallet.address}</div>
+                            <div className="text-gray-400 text-xs">{wallet.reason}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-white font-semibold">
+                              {formatTokenAmount(liveData?.currentBalance || wallet.balance)}
+                            </div>
+                            <div className="text-blue-400 text-xs">
+                              {formatPercentage(wallet.supplyPercentage)} of supply
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {liveData && (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-3 border-t border-blue-700/30">
+                            <div>
+                              <div className="text-gray-400 text-xs">USD Value</div>
+                              <div className="text-green-400 font-semibold">
+                                {formatUSD(liveData.usdValue)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400 text-xs">Last Activity</div>
+                              <div className="text-white text-sm">
+                                {liveData.lastActivity ? new Date(liveData.lastActivity).toLocaleDateString() : 'No activity'}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400 text-xs">Risk Level</div>
+                              <div className={`font-semibold ${
+                                wallet.supplyPercentage > 5 ? 'text-red-400' : 
+                                wallet.supplyPercentage > 2 ? 'text-yellow-400' : 'text-green-400'
+                              }`}>
+                                {wallet.supplyPercentage > 5 ? 'High' : 
+                                 wallet.supplyPercentage > 2 ? 'Medium' : 'Low'}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400 text-xs">Status</div>
+                              <div className={`font-semibold ${
+                                liveData.isActive ? 'text-green-400' : 'text-gray-400'
+                              }`}>
+                                {liveData.isActive ? '🟢 Active' : '⚫ Inactive'}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="text-right">
-                        <div className="text-white font-semibold">{wallet.percentage}%</div>
-                        <div className={`text-xs px-2 py-1 rounded ${getRiskColor(wallet.riskLevel)}`}>
-                          {wallet.riskLevel}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {liveData && (
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 pt-3 border-t border-gray-700">
-                        <div className="text-center">
-                          <div className="text-green-400 font-semibold">{formatTokenAmount(liveData.totalBought)}</div>
-                          <div className="text-xs text-gray-400">Total Bought</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-red-400 font-semibold">{formatTokenAmount(liveData.totalSold)}</div>
-                          <div className="text-xs text-gray-400">Total Sold</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-blue-400 font-semibold">{formatTokenAmount(liveData.currentBalance)}</div>
-                          <div className="text-xs text-gray-400">Current Balance</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-yellow-400 font-semibold">{formatUSD(liveData.totalUsdValue)}</div>
-                          <div className="text-xs text-gray-400">USD Value</div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {liveData?.lastTransaction && (
-                      <div className="mt-3 pt-3 border-t border-gray-700">
-                        <div className="text-xs text-gray-400 mb-1">Last Transaction:</div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-white">
-                            {liveData.lastTransaction.type} {formatTokenAmount(liveData.lastTransaction.amount)}
-                          </span>
-                          <span className="text-gray-400">
-                            {new Date(liveData.lastTransaction.timestamp).toLocaleString()}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="text-green-400 text-4xl mb-4">✅</div>
+                  <div className="text-white font-semibold mb-2">No team wallets detected</div>
+                  <div className="text-gray-400 text-sm">This token appears to have no large team holdings</div>
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
-          {/* Enhanced Bundle Wallets */}
-          <div className="bg-gray-900/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
-            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-              <Wallet className="w-5 h-5" />
-              Bundle Wallets - Live Analytics
-            </h3>
-            <div className="space-y-4">
-              {analysisResults.bundleWallets.map((wallet, index) => {
-                const liveData = realTimeData[wallet.address];
-                return (
-                  <div key={index} className="bg-gray-800/50 p-4 rounded-lg">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="text-white font-mono text-sm">{wallet.address}</div>
-                        <div className="text-gray-400 text-xs">{wallet.type}</div>
+          {/* Bundle Wallets */}
+          {analysisResults && (
+            <div className="bg-gradient-to-r from-red-900/20 to-red-800/20 backdrop-blur-sm border border-red-700/30 rounded-xl p-6">
+              <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <TrendingDown className="w-5 h-5 text-red-400" />
+                Bundle Wallets ({(analysisResults.bundleWallets || []).length})
+                {monitoringActive && <span className="text-green-400 text-sm animate-pulse">● LIVE</span>}
+              </h3>
+              
+              {(analysisResults.bundleWallets || []).length > 0 ? (
+                <div className="space-y-4">
+                  {analysisResults.bundleWallets.map((wallet, index) => {
+                    const liveData = realTimeData[wallet.address];
+                    return (
+                      <div key={index} className="bg-gray-800/50 p-4 rounded-lg border border-red-700/30">
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <div className="text-red-400 font-mono text-sm">{wallet.address}</div>
+                            <div className="text-gray-400 text-xs">{wallet.reason}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-white font-semibold">
+                              {formatTokenAmount(liveData?.currentBalance || wallet.balance)}
+                            </div>
+                            <div className="text-red-400 text-xs">
+                              {formatPercentage(wallet.supplyPercentage)} of supply
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {liveData && (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-3 border-t border-red-700/30">
+                            <div>
+                              <div className="text-gray-400 text-xs">USD Value</div>
+                              <div className="text-green-400 font-semibold">
+                                {formatUSD(liveData.usdValue)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400 text-xs">Last Activity</div>
+                              <div className="text-white text-sm">
+                                {liveData.lastActivity ? new Date(liveData.lastActivity).toLocaleDateString() : 'No activity'}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400 text-xs">Sell Pressure</div>
+                              <div className={`font-semibold ${
+                                liveData.sellPressure > 0.7 ? 'text-red-400' : 
+                                liveData.sellPressure > 0.3 ? 'text-yellow-400' : 'text-green-400'
+                              }`}>
+                                {liveData.sellPressure ? `${(liveData.sellPressure * 100).toFixed(1)}%` : '0%'}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400 text-xs">Status</div>
+                              <div className={`font-semibold ${
+                                liveData.isActive ? 'text-green-400' : 'text-gray-400'
+                              }`}>
+                                {liveData.isActive ? '🟢 Active' : '⚫ Inactive'}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="text-right">
-                        <div className="text-white font-semibold">{wallet.percentage}%</div>
-                        <div className={`text-xs px-2 py-1 rounded ${getRiskColor(wallet.riskLevel)}`}>
-                          {wallet.riskLevel}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {liveData && (
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 pt-3 border-t border-gray-700">
-                        <div className="text-center">
-                          <div className="text-green-400 font-semibold">{formatTokenAmount(liveData.totalBought)}</div>
-                          <div className="text-xs text-gray-400">Total Bought</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-red-400 font-semibold">{formatTokenAmount(liveData.totalSold)}</div>
-                          <div className="text-xs text-gray-400">Total Sold</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-blue-400 font-semibold">{formatTokenAmount(liveData.currentBalance)}</div>
-                          <div className="text-xs text-gray-400">Current Balance</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-yellow-400 font-semibold">{formatUSD(liveData.totalUsdValue)}</div>
-                          <div className="text-xs text-gray-400">USD Value</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="text-green-400 text-4xl mb-4">✅</div>
+                  <div className="text-white font-semibold mb-2">No bundle wallets detected</div>
+                  <div className="text-gray-400 text-sm">This token appears to have no coordinated wallet activity</div>
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           {/* Risk Assessment */}
-          <div className="bg-gray-900/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
-            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5" />
+          <div className="bg-gradient-to-r from-purple-900/20 to-purple-800/20 backdrop-blur-sm border border-purple-700/30 rounded-xl p-6">
+            <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+              <Shield className="w-5 h-5 text-purple-400" />
               Risk Assessment
             </h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-300">Overall Risk Level</span>
-                <span className={`px-3 py-1 rounded font-semibold ${getRiskColor(analysisResults.riskAssessment.overall)}`}>
-                  {analysisResults.riskAssessment.overall}
-                </span>
-              </div>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-300">Rug Pull Risk</span>
-                  <span className="text-white">{analysisResults.riskAssessment.rugPullRisk}%</span>
-                </div>
-                <div className="w-full bg-gray-700 rounded-full h-2">
-                  <div 
-                    className="bg-gradient-to-r from-red-600 to-red-400 h-2 rounded-full transition-all duration-1000"
-                    style={{ width: `${analysisResults.riskAssessment.rugPullRisk}%` }}
-                  ></div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-gray-800/50 p-4 rounded-lg">
+                <div className="text-gray-400 text-sm mb-2">Overall Risk</div>
+                <div className={`text-2xl font-bold ${
+                  analysisResults.teamWallets.length > 3 || analysisResults.bundleWallets.length > 5 ? 'text-red-400' :
+                  analysisResults.teamWallets.length > 1 || analysisResults.bundleWallets.length > 2 ? 'text-yellow-400' :
+                  'text-green-400'
+                }`}>
+                  {analysisResults.teamWallets.length > 3 || analysisResults.bundleWallets.length > 5 ? 'HIGH' :
+                   analysisResults.teamWallets.length > 1 || analysisResults.bundleWallets.length > 2 ? 'MEDIUM' :
+                   'LOW'}
                 </div>
               </div>
-              <div className="bg-red-900/20 border border-red-700/50 p-4 rounded-lg">
-                <div className="text-red-300 font-semibold mb-2">⚠️ Recommendation</div>
-                <div className="text-gray-300 text-sm">{analysisResults.riskAssessment.recommendation}</div>
+              <div className="bg-gray-800/50 p-4 rounded-lg">
+                <div className="text-gray-400 text-sm mb-2">Team Concentration</div>
+                <div className="text-white text-lg font-semibold">
+                  {formatPercentage(
+                    analysisResults.teamWallets.reduce((sum, w) => sum + w.supplyPercentage, 0)
+                  )}
+                </div>
+              </div>
+              <div className="bg-gray-800/50 p-4 rounded-lg">
+                <div className="text-gray-400 text-sm mb-2">Bundle Concentration</div>
+                <div className="text-white text-lg font-semibold">
+                  {formatPercentage(
+                    analysisResults.bundleWallets.reduce((sum, w) => sum + w.supplyPercentage, 0)
+                  )}
+                </div>
               </div>
             </div>
           </div>

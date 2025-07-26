@@ -22,7 +22,7 @@ const Dashboard = ({ setActiveSection }) => {
     },
     {
       id: 'team-bundle-scanner',
-      title: 'Team & Bundle Wallet Scanner',
+      title: 'Team & Bundle Wallet Analysis',
       description: 'Comprehensive wallet tracking and rug pull detection system',
       icon: Users,
       color: 'from-blue-600 to-blue-400',
