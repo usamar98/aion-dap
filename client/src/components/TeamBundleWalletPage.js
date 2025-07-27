@@ -207,6 +207,13 @@ const TeamBundleWalletPage = () => {
     }).format(amount);
   };
 
+  const formatNumber = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(amount);
+  };
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -228,22 +235,6 @@ const TeamBundleWalletPage = () => {
       currency: 'USD'
     }).format(amount);
   };
-
-  const getWalletRiskColor = (wallet) => {
-    if (wallet.type === 'Team Wallet') {
-      return wallet.supplyPercentage > 5 ? 'text-red-400' : 'text-yellow-400';
-    }
-    return 'text-orange-400';
-  };
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (monitoringActive) {
-        stopMonitoring();
-      }
-    };
-  }, [monitoringActive, stopMonitoring]);
 
   return (
     <div className="space-y-6">
