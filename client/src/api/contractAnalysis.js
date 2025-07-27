@@ -1,4 +1,8 @@
-import { ethers } from 'ethers';
+// Remove unused import:
+// import { ethers } from 'ethers'; (only used in one function, can be imported locally if needed)
+
+// The ethers import is only used in getContractBalance function
+// Consider importing it locally in that function if needed
 
 // Mock API endpoints - replace with actual blockchain API services
 const API_ENDPOINTS = {

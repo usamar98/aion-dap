@@ -3,7 +3,7 @@ import axios from 'axios';
 class WalletAnalyticsService {
   constructor() {
     this.moralisApiKey = process.env.REACT_APP_MORALIS_API_KEY;
-    // Remove this line:
+    // Remove this unused line:
     // this.covalentApiKey = process.env.REACT_APP_COVALENT_API_KEY;
     this.etherscanApiKey = process.env.REACT_APP_ETHERSCAN_API_KEY;
     
@@ -333,7 +333,7 @@ class WalletAnalyticsService {
   }
 
   async classifyWallet(holder, deployer, metadata, blockchain) {
-    const { address, balance, percentage } = holder;
+    const { address, percentage } = holder;
     
     console.log(`🔍 Classifying wallet ${address.slice(0, 8)}... with ${percentage?.toFixed(4)}% holdings`);
     

@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, AlertTriangle, CheckCircle, Copy, ExternalLink, TrendingUp, Users, Clock, Globe, Eye, Server, Bug, Zap } from 'lucide-react';
+import { Shield, AlertTriangle, CheckCircle, TrendingUp, Clock, Globe, Server, Bug, Zap } from 'lucide-react';
 
 const TokenSecurityPage = ({ title }) => {
   const [tokenAddress, setTokenAddress] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [results, setResults] = useState(null);
   const [urlScanResults, setUrlScanResults] = useState(null);
 
   // Trusted domains whitelist
@@ -184,22 +183,6 @@ const TokenSecurityPage = ({ title }) => {
       };
       
       setUrlScanResults(scanResults);
-      setResults({
-        contractAddress: tokenAddress,
-        tokenName: 'URL Scan Result',
-        symbol: 'SCAN',
-        riskLevel: scanResults.riskAssessment.overallRisk,
-        securityScore: 100 - scanResults.securityRecommendation.riskScore,
-        issues: scanResults.threatsDetected.length > 0 ? 
-          scanResults.threatsDetected.map(threat => ({
-            type: threat.severity === 'Critical' ? 'warning' : threat.severity === 'High' ? 'warning' : 'info',
-            message: `${threat.type}: ${threat.description}`
-          })) : [
-            { type: 'success', message: 'No security threats detected' },
-            { type: 'success', message: 'Domain has good reputation' },
-            { type: 'info', message: 'SSL certificate is valid' }
-          ]
-      });
       setIsLoading(false);
     }, 1500);
   };

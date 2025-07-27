@@ -1,6 +1,10 @@
+// Remove unused imports:
+// - TrendingUp, Users, Wallet, Shield, AlertTriangle
+// These are imported but not used in the component
+
 import React from 'react';
 import { motion } from 'framer-motion';
-import { ExternalLink, TrendingUp, Users, Wallet, Shield, AlertTriangle } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 
 const TokenCard = ({ tokenData, index }) => {
   const formatNumber = (num) => {

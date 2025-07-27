@@ -6,11 +6,11 @@ class RealTimeMonitor {
   constructor() {
     this.monitoredWallets = new Map();
     this.alertSubscribers = new Set();
-    this.updateSubscribers = new Set(); // Add this
+    this.updateSubscribers = new Set();
     this.isMonitoring = false;
     this.monitorInterval = null;
-    this.tokenAddress = null; // Add this
-    this.blockchain = null; // Add this
+    this.tokenAddress = null;
+    this.blockchain = null;
   }
 
   // Add initialize method (place this after constructor)
@@ -138,7 +138,7 @@ class RealTimeMonitor {
     return true;
   }
 
-  // Enhanced polling with staggered checks
+  // Enhanced polling with staggered checks (keep this version)
   startPolling() {
     this.monitorInterval = setInterval(async () => {
       await this.checkAllWalletsStaggered();
@@ -163,7 +163,7 @@ class RealTimeMonitor {
     }
   }
 
-  // Enhanced sell detection with better accuracy
+  // Enhanced sell detection with better accuracy (keep this version)
   async handleSellDetected(wallet, amountSold, newBalance) {
     try {
       console.log(`🚨 Sell detected for ${wallet.type}: ${amountSold.toFixed(4)} tokens`);

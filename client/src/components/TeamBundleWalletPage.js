@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Wallet, Users, Activity, CheckCircle, AlertTriangle, TrendingDown, Zap, Wifi, X, Shield, RefreshCw, DollarSign, TrendingUp, Eye, Bell } from 'lucide-react';
+import { Search, Users, Activity, AlertTriangle, TrendingDown, Zap, X, Shield, Eye, Bell } from 'lucide-react';
 import WalletAnalyticsService from '../services/WalletAnalyticsService';
 import RealTimeMonitor from '../services/RealTimeMonitor';
 import TelegramAlertService from '../services/TelegramAlertService';
@@ -197,6 +197,15 @@ const TeamBundleWalletPage = () => {
       maximumFractionDigits: 2
     }).format(amount);
   };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (monitoringActive) {
+        stopMonitoring();
+      }
+    };
+  }, [monitoringActive, stopMonitoring]);
 
   const formatPercentage = (percentage) => {
     if (!percentage) return '0%';

@@ -1,12 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { gsap } from 'gsap';
-import { Moon, Sun, Wallet, LogOut, ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
-import { useTheme } from '../context/ThemeContext';
+import { Wallet, LogOut, ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { useWeb3 } from '../context/Web3Context';
 
 const Header = ({ activeSection, setActiveSection }) => {
-  const { isDark, toggleTheme } = useTheme();
   const { isConnected, account, connectWallet, disconnectWallet } = useWeb3();
   const headerRef = useRef(null);
   const [cryptoData, setCryptoData] = useState([
