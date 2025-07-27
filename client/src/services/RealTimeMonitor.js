@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { ethers } from 'ethers';
 import WalletAnalyticsService from './WalletAnalyticsService';
 
 class RealTimeMonitor {
@@ -240,22 +239,14 @@ class RealTimeMonitor {
 
   // Stop monitoring
   stopMonitoring() {
+    this.isMonitoring = false;
+    
     if (this.monitorInterval) {
       clearInterval(this.monitorInterval);
       this.monitorInterval = null;
     }
     
-    this.isMonitoring = false;
-    this.monitoredWallets.clear();
-    
     console.log('Stopped wallet monitoring');
-  }
-
-  // Start polling for changes
-  startPolling() {
-    this.monitorInterval = setInterval(async () => {
-      await this.checkAllWallets();
-    }, 30000); // Check every 30 seconds
   }
 
   // Check all monitored wallets for changes
