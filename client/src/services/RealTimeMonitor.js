@@ -295,65 +295,6 @@ class RealTimeMonitor {
     }
   }
 
-  // Handle detected sell transaction
-  async handleSellDetected(wallet, amountSold, newBalance) {
-    try {
-      // Get recent transactions to find the sell transaction
-      const recentTxs = await WalletAnalyticsService.getTransactionHistory(
-        wallet.address,
-        wallet.tokenAddress,
-        wallet.network
-      );
-      
-      // Find the most recent outgoing transaction
-      const sellTx = recentTxs.find(tx => 
-        tx.from.toLowerCase() === wallet.address.toLowerCase() &&
-        Date.now() - tx.timestamp < 5 * 60 * 1000 // Within last 5 minutes
-      );
-      
-      if (sellTx) {
-        const usdValue = await WalletAnalyticsService.getUSDValue(
-          amountSold,
-          wallet.tokenAddress,
-          sellTx.timestamp,
-          wallet.network
-        );
-        
-        const destination = await WalletAnalyticsService.identifyDEX(
-          sellTx.to,
-          wallet.network
-        );
-        
-        const alertData = {
-          walletAddress: wallet.address,
-          walletType: wallet.type,
-          tokenAddress: wallet.tokenAddress,
-          network: wallet.network,
-          amountSold,
-          usdValue,
-          previousBalance: wallet.lastBalance,
-          newBalance,
-          changePercentage: ((amountSold / wallet.lastBalance) * 100).toFixed(2),
-          destination,
-          transactionHash: sellTx.hash,
-          timestamp: sellTx.timestamp,
-          explorerLink: this.getExplorerLink(sellTx.hash, wallet.network)
-        };
-        
-        // Send alerts
-        await this.sendAlert(alertData);
-        
-        // Store in database
-        await this.storeAlert(alertData);
-        
-        // Notify subscribers
-        this.notifySubscribers(alertData);
-      }
-    } catch (error) {
-      console.error('Error handling sell detection:', error);
-    }
-  }
-
   // Send alert via multiple channels
   async sendAlert(alertData) {
     // Send Telegram alert

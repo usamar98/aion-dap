@@ -220,15 +220,6 @@ const TeamBundleWalletPage = () => {
     }).format(amount);
   };
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount);
-  };
-
   const getWalletRiskColor = (wallet) => {
     if (wallet.type === 'Team Wallet') {
       return wallet.supplyPercentage > 5 ? 'text-red-400' : 'text-yellow-400';
